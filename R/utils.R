@@ -1,34 +1,94 @@
 
-is.named <- function(x) {
-  !is.null(names(x)) && all(names(x) != "")
-}
-
-set_envvar <- function(envs) {
-  if (length(envs) == 0) return()
-
-  stopifnot(is.named(envs))
-
-  old <- Sys.getenv(names(envs), names = TRUE, unset = NA)
-  set <- !is.na(envs)
-
-  both_set <- set & !is.na(old)
-
-  if (any(set))  do.call("Sys.setenv", as.list(envs[set]))
-  if (any(!set)) Sys.unsetenv(names(envs)[!set])
-
-  invisible(old)
-}
-
-with_envvar <- function(new, code) {
-  old <- set_envvar(new)
-  on.exit(set_envvar(old))
-  force(code)
-}
-
 read_char <- function(path, ...) {
   readChar(path, nchars = file.info(path)$size, ...)
 }
 
 win2unix <- function(str) {
   gsub("\r\n", "\n", str, fixed = TRUE)
+}
+
+#' @importFrom utils download.file
+
+download_file <- function(url, quiet = TRUE) {
+  download.file(url, tmp <- tempfile(), quiet = quiet)
+  on.exit(unlink(tmp), add = TRUE)
+  readLines(tmp)
+}
+
+is_string <- function(x) {
+  is.character(x) && length(x) == 1 && !is.na(x)
+}
+
+`%notin%` <- function(needle, haystack) {
+  ! (needle %in% haystack)
+}
+
+`%||%` <- function(l, r) if (is.null(l)) r else l
+
+#' Alternative to data.frame
+#'
+#' * Sets stringsAsFactors to FALSE by default
+#' * If any columns have zero length, the result will have
+#'   zero rows.
+#' * If a column is a scalar, then it will be recycled.
+#' * Non-matching number of rows gives an error, except for
+#'   lengths zero and one.
+#'
+#' @param ... Named data frame columns, or data frames.
+#' @param stringsAsFactors Just leave it on FALSE. :)
+#' @return Data frame.
+#'
+#' @keywords internal
+
+data_frame <- function(..., stringsAsFactors = FALSE) {
+  cols <- list(...)
+  stopifnot(length(cols) > 0)
+
+  len <- vapply(cols, NROW, 1L)
+  maxlen <- max(len)
+  stopifnot(all(len %in% c(0, 1, maxlen)))
+
+  ## recycle, only scalars. If one empty, all empty
+  res_len <- if (0 %in% len) 0 else maxlen
+  cols2 <- lapply(cols, function(x) myrep(x, res_len))
+  names(cols2) <- names(cols)
+
+  res <- do.call(
+    data.frame,
+    c(cols2, list(stringsAsFactors = stringsAsFactors))
+  )
+  reset_row_names(res)
+}
+
+#' Recycle a vector or a data frame (rows)
+#'
+#' @param x Vector or data frame to replicate. Must be length 0, 1, or
+#'   len.
+#' @param len Expected length.
+#'
+#' @keywords internal
+
+myrep <- function(x, len) {
+
+  stopifnot(len == 0 || NROW(x) == len || NROW(x) == 1)
+
+  if (NROW(x) == len) {
+    x
+
+  } else if (is.data.frame(x)) {
+    x[ rep(1, len), ]
+
+  } else {
+    rep(x, length.out = len)
+  }
+}
+
+reset_row_names <- function(df) {
+  rownames(df) <- NULL
+  df
+}
+
+first_line <- function(x) {
+  l <- strsplit(x, "\n", fixed = TRUE)
+  vapply(l, "[[", "", 1)
 }
