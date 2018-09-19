@@ -1,20 +1,156 @@
 
-parse_check_output <- function(output) {
+new_rcmdcheck <- function(stdout,
+                          stderr,
+                          description,
+                          status = 0L,
+                          duration = 0L,
+                          timeout = FALSE,
+                          test_fail = NULL,
+                          session_info = NULL) {
 
-  entries <- strsplit(paste0("\n", output$stdout), "\n* ", fixed = TRUE)[[1]][-1]
+  stopifnot(inherits(description, "description"))
 
-  structure(
+  # Make sure we don't have \r on windows
+  stdout <- win2unix(stdout)
+  stderr <- win2unix(stderr)
+
+  entries <- strsplit(paste0("\n", stdout), "\n* ", fixed = TRUE)[[1]][-1]
+  checkdir <- parse_checkdir(entries)
+
+  notdone <- function(x) grep("DONE", x, invert = TRUE, value = TRUE)
+
+  res <- structure(
     list(
-      output   = output,
-      errors   = grep(" ... ERROR\n",   entries, value = TRUE, fixed = TRUE),
-      warnings = grep(" ... WARNING\n", entries, value = TRUE, fixed = TRUE),
-      notes    = grep(" ... NOTE\n",    entries, value = TRUE, fixed = TRUE),
-      package  = parse_package(entries),
-      version  = parse_version(entries),
-      rversion = parse_rversion(entries),
-      platform = parse_platform(entries)
+      stdout      = stdout,
+      stderr      = stderr,
+      status      = status,
+      duration    = duration,
+      timeout     = timeout,
+
+      rversion    = parse_rversion(entries),
+      platform    = parse_platform(entries),
+      errors      = notdone(grep("ERROR\n",   entries, value = TRUE)),
+      warnings    = notdone(grep("WARNING\n", entries, value = TRUE)),
+      notes       = notdone(grep("NOTE\n",    entries, value = TRUE)),
+
+      description = description$str(normalize = FALSE),
+      package     = description$get("Package")[[1]],
+      version     = description$get("Version")[[1]],
+      cran        = description$get_field("Repository", "") == "CRAN",
+      bioc        = description$has_fields("biocViews"),
+
+      checkdir    = checkdir,
+      test_fail   = test_fail %||% get_test_fail(checkdir),
+      install_out = get_install_out(checkdir)
     ),
     class = "rcmdcheck"
+  )
+
+  res$session_info <- get_session_info(res$package, session_info)
+
+  if (isTRUE(timeout)) {
+    res$errors <- c(res$errors, "R CMD check timed out")
+  }
+
+  res
+}
+
+parse_rversion <- function(entries) {
+  line <- grep("^using R version", entries, value = TRUE)
+  sub("^using R version ([^\\s]+)\\s.*$", "\\1", line, perl = TRUE)
+}
+
+parse_platform <- function(entries) {
+  line <- grep("^using platform:", entries, value = TRUE)
+  sub("^using platform: ([^\\s]+)\\s.*$", "\\1", line, perl = TRUE)
+}
+
+parse_checkdir <- function(entries) {
+  quotes <- "\\x91\\x92\u2018\u2019`'"
+
+  line <- grep("^using log directory", entries, value = TRUE)
+  sub(
+    paste0("^using log directory [", quotes, "]([^", quotes, "]+)[", quotes, "]$"),
+    "\\1",
+    line,
+    perl = TRUE
+  )
+}
+
+#' @export
+as.data.frame.rcmdcheck <- function(x,
+                                    row.names = NULL,
+                                    optional = FALSE,
+                                    ...,
+                                    which) {
+
+  entries <- list(
+    type = c(
+      rep("error", length(x$errors)),
+      rep("warning", length(x$warnings)),
+      rep("note", length(x$notes))
+    ),
+    output = c(x$errors, x$warnings, x$notes)
+  )
+
+  data_frame(
+    which = which,
+    platform = x$platform %||% NA_character_,
+    rversion = x$rversion %||% NA_character_,
+    package = x$package %||% NA_character_,
+    version = x$version %||% NA_character_,
+    type = entries$type,
+    output = entries$output,
+    hash = hash_check(entries$output)
+  )
+}
+
+#' @importFrom digest digest
+
+hash_check <- function(check) {
+  cleancheck <- gsub("[^a-zA-Z0-9]", "", first_line(check))
+  vapply(cleancheck, digest, "")
+}
+
+#' Parse \code{R CMD check} results from a file or string
+#'
+#' At most one of \code{file} or \code{text} can be given.
+#' If both are \code{NULL}, then the current working directory
+#' is checked for a \code{00check.log} file.
+#'
+#' @param file The \code{00check.log} file, or a directory that
+#'   contains that file. It can also be a connection object.
+#' @param text The contentst of a \code{00check.log} file.
+#' @param ... Other arguments passed onto the constructor.
+#'   Used for testing.
+#' @return An \code{rcmdcheck} object, the check results.
+#'
+#' @seealso \code{\link{parse_check_url}}
+#' @export
+#' @importFrom desc description
+
+parse_check <- function(file = NULL, text = NULL, ...) {
+
+  ## If no text, then find the file, and read it in
+  if (is.null(text)) {
+    file <- find_check_file(file)
+    text <- readLines(file)
+  }
+  stdout <- paste(text, collapse = "\n")
+
+  # Simulate minimal description from info in log
+  entries <- strsplit(paste0("\n", stdout), "\n* ", fixed = TRUE)[[1]][-1]
+  desc <- desc::description$new("!new")
+  desc$set(
+    Package = parse_package(entries),
+    Version = parse_version(entries)
+  )
+
+  new_rcmdcheck(
+    stdout = stdout,
+    stderr = "",
+    description = desc,
+    ...
   )
 }
 
@@ -38,46 +174,6 @@ parse_version <- function(entries) {
   )
 }
 
-parse_rversion <- function(entries) {
-  line <- grep("^using R version", entries, value = TRUE)
-  sub("^using R version ([^\\s]+)\\s.*$", "\\1", line, perl = TRUE)
-}
-
-parse_platform <- function(entries) {
-  line <- grep("^using platform:", entries, value = TRUE)
-  sub("^using platform: ([^\\s]+)\\s.*$", "\\1", line, perl = TRUE)
-}
-
-#' Parse \code{R CMD check} results from a file or string
-#'
-#' At most one of \code{file} or \code{text} can be given.
-#' If both are \code{NULL}, then the current working directory
-#' is checked for a \code{00check.log} file.
-#'
-#' @param file The \code{00check.log} file, or a directory that
-#'   contains that file. It can also be a connection object.
-#' @param text The contentst of a \code{00check.log} file.
-#' @return An \code{rcmdcheck} object, the check results.
-#'
-#' @seealso \code{\link{parse_check_url}}
-#' @export
-
-parse_check <- function(file = NULL, text = NULL) {
-
-  ## If no text, then find the file, and read it in
-  if (is.null(text)) {
-    file <- find_check_file(file)
-    text <- readLines(file)
-  }
-
-  output <- list(
-    stdout = paste(text, collapse = "\n"),
-    stderr = "",
-    status = 0
-  )
-
-  parse_check_output(output)
-}
 
 #' Shorthand to parse R CMD check results from a URL
 #'

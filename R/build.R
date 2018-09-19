@@ -1,26 +1,34 @@
 
-#' @importFrom withr with_dir
+#' @importFrom pkgbuild pkgbuild_process
+#' @importFrom withr with_envvar
 
-build_package <- function(path, tmpdir) {
+build_package <- function(path, tmpdir, build_args, libpath, quiet) {
+  dir.create(tmpdir, recursive = TRUE, showWarnings = FALSE)
 
-  dir.create(tmpdir)
-  file.copy(path, tmpdir, recursive = TRUE)
-
-  ## If not a tar.gz, build it. Otherwise just leave it as it is.
   if (file.info(path)$isdir) {
-    build_status <- with_dir(
-      tmpdir,
-      rcmd_safe("build", basename(path))
+    if (!quiet) cat_head("R CMD build")
+    with_envvar(
+      c("R_LIBS_USER" = paste(libpath, collapse = .Platform$path.sep)), {
+        proc <- pkgbuild_process$new(path, tmpdir, args = build_args)
+        on.exit(proc$kill(), add = TRUE)
+        callback <- block_callback()
+        while (proc$is_incomplete_output() || proc$is_incomplete_error()) {
+          proc$poll_io(-1)
+          out <- proc$read_output()
+          err <- proc$read_error()
+          if (!quiet) {
+            out <- sub("(checking for file .)/.*DESCRIPTION(.)",
+                       "\\1.../DESCRIPTION\\2", out, perl = TRUE)
+            callback(out)
+            callback(err)
+          }
+        }
+        proc$get_built_file()
+      }
     )
-    unlink(file.path(tmpdir, basename(path)), recursive = TRUE)
-    report_system_error("Build failed", build_status)
+
+  } else {
+    file.copy(path, tmpdir)
+    file.path(tmpdir, basename(path))
   }
-
-  ## replace previous handler, no need to clean up any more
-  on.exit(NULL)
-
-  file.path(
-    tmpdir,
-    list.files(tmpdir, pattern = "\\.tar\\.gz$")
-  )
 }

@@ -35,7 +35,7 @@ is_string <- function(x) {
 #'   lengths zero and one.
 #'
 #' @param ... Named data frame columns, or data frames.
-#' @param stringsAsFactors Just leave it on FALSE. :)
+#' @param stringsAsFactors Just leave it on `FALSE`. `:)`
 #' @return Data frame.
 #'
 #' @keywords internal
@@ -91,4 +91,92 @@ reset_row_names <- function(df) {
 first_line <- function(x) {
   l <- strsplit(x, "\n", fixed = TRUE)
   vapply(l, "[[", "", 1)
+}
+
+last_char <- function(x) {
+  l <- nchar(x)
+  substr(x, l, l)
+}
+
+cat0 <- function(..., sep = "") {
+  cat(..., sep = "")
+}
+
+get_install_out <- function(path) {
+  install_out <- file.path(path, "00install.out")
+  if (is_string(install_out) && file.exists(install_out)) {
+    win2unix(read_char(install_out))
+  } else {
+    "<00install.out file does not exist>"
+  }
+}
+
+get_test_fail <- function(path) {
+  test_path <- file.path(path, "tests")
+  paths <- dir(test_path, pattern = "\\.Rout\\.fail$", full.names = TRUE)
+  names(paths) <- gsub("\\.Rout.fail", "", basename(paths))
+
+  trim_header <- function(x) {
+    first_gt <- regexpr(">", x)
+    substr(x, first_gt, nchar(x))
+  }
+
+  tests <- lapply(paths, read_char)
+  tests <- lapply(tests, win2unix)
+  lapply(tests, trim_header)
+}
+
+
+#' @importFrom crayon col_nchar
+
+col_align <- function(text, width = getOption("width"),
+                      align = c("left", "center", "right")) {
+
+  align <- match.arg(align)
+  nc <- col_nchar(text)
+
+  if (width <= nc) {
+    text
+
+  } else if (align == "left") {
+    paste0(text, make_space(width - nc))
+
+  } else if (align == "center") {
+    paste0(make_space(ceiling((width - nc) / 2)),
+           text,
+           make_space(floor((width - nc) / 2)))
+
+  } else {
+    paste0(make_space(width - nc), text)
+  }
+}
+
+strrep <- function(x, times) {
+  x <- as.character(x)
+  if (length(x) == 0L) return(x)
+  r <- .mapply(
+    function(x, times) {
+      if (is.na(x) || is.na(times)) return(NA_character_)
+      if (times <= 0L) return("")
+      paste0(replicate(times, x), collapse = "")
+    },
+    list(x = x, times = times), MoreArgs = list())
+  unlist(r, use.names = FALSE)
+}
+
+make_space <- function(num, filling = " ") {
+  strrep(filling, num)
+}
+
+cat_line <- function(..., style = NULL) {
+  text <- paste0(..., collapse = "")
+  if (!is.null(style)) {
+    text <- style(text)
+  }
+
+  cat(text, "\n", sep = "")
+}
+
+duration <- function(start) {
+  as.double(Sys.time() - start, units = "secs")
 }

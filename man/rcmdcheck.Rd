@@ -7,7 +7,9 @@
 \title{Run R CMD check from R and Capture Results}
 \usage{
 rcmdcheck(path = ".", quiet = FALSE, args = character(),
-  libpath = .libPaths(), repos = getOption("repos"))
+  build_args = character(), check_dir = NULL, libpath = .libPaths(),
+  repos = getOption("repos"), timeout = Inf, error_on = c("never",
+  "error", "warning", "note"))
 }
 \arguments{
 \item{path}{Path to a package tarball or a directory.}
@@ -15,7 +17,16 @@ rcmdcheck(path = ".", quiet = FALSE, args = character(),
 \item{quiet}{Whether to print check output during checking.}
 
 \item{args}{Character vector of arguments to pass to
-\code{R CMD check}.}
+\code{R CMD check}. (Note that instead of the \code{--output} option you
+should use the \code{check_dir} argument, because  \code{--output} cannot
+deal with spaces and other special characters on Windows.}
+
+\item{build_args}{Character vector of arguments to pass to
+\code{R CMD build}}
+
+\item{check_dir}{Path to a directory where the check is performed.
+If this is not \code{NULL}, then the a temporary directory is used, that
+is cleaned up when the returned object is garbage collected.}
 
 \item{libpath}{The library path to set for the check.
 The default uses the current library path.}
@@ -23,16 +34,26 @@ The default uses the current library path.}
 \item{repos}{The \code{repos} option to set for the check.
 This is needed for cyclic dependency checks if you use the
 \code{--as-cran} argument. The default uses the current value.}
+
+\item{timeout}{Timeout for the check, in seconds, or as a
+\link[base:difftime]{base::difftime} object. If it is not finished before this, it will be
+killed. \code{Inf} means no timeout. If the check is timed out,
+that is added as an extra error to the result object.}
+
+\item{error_on}{Whether to throw an error on \code{R CMD check} failures.
+Note that the check is always completed (unless a timeout happens),
+and the error is only thrown after completion. If \code{"never"}, then
+no errors are thrown. If \code{"error"}, then only \code{ERROR} failures
+generate errors. If \code{"warning"}, then \code{WARNING} failures generate
+errors as well. If \code{"note"}, then any check failure generated an
+error.}
 }
 \value{
 An S3 object (list) with fields \code{errors},
-  \code{warnings} and \code{nodes}. These are all character
-  vectors containing the output for the failed check.
+\code{warnings} and \code{notes}. These are all character
+vectors containing the output for the failed check.
 }
 \description{
 Run R CMD check form R programatically, and capture the results of the
 individual checks.
-
-Run \code{R CMD check} on a package or a directory
 }
-

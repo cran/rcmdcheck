@@ -1,26 +1,47 @@
 
+#' Print R CMD check results
+#' @param x Check result object to print.
+#' @param header Whether to print a header.
+#' @param ... Additional arguments, currently ignored.
 #' @export
-#' @importFrom clisymbols symbol
+#' @importFrom cli symbol
+#' @importFrom prettyunits pretty_sec
 
-print.rcmdcheck <- function(x, ...) {
+print.rcmdcheck <- function(x, header = TRUE, ...) {
 
-  cat("\n")
-
-  print_header("R CMD check results", paste(x$package, x$version))
+  if (header) {
+    cat_head("R CMD check results", paste(x$package, x$version))
+    cat_line("Duration: ", pretty_sec(x$duration))
+    cat_line()
+  }
 
   if (length(x$errors)) {
-    lapply(x$errors, print_entry)
+    lapply(x$errors, print_entry, entry_style = "err")
   }
 
   if (length(x$warnings)) {
-    lapply(x$warnings, print_entry)
+    lapply(x$warnings, print_entry, entry_style = "warn")
   }
 
   if (length(x$notes)) {
-    lapply(x$notes, print_entry)
+    lapply(x$notes, print_entry, entry_style = "note")
   }
 
-  summary(x, ...)
+  if (install_failed(x$stdout)) {
+    cat_head("Install failure")
+    cat_line()
+    cat(x$install_out)
+    cat_line()
+  }
+
+  for (fail in names(x$test_fail)) {
+    cat_head("Test failures", fail)
+    cat_line()
+    cat(x$test_fail[[fail]])
+    cat_line()
+  }
+
+  print(summary(x, ...), line = FALSE)
 }
 
 make_line <- function(x) {
@@ -64,30 +85,41 @@ header_line <- function(left = "", right = "",
 
 #' @importFrom crayon cyan
 
-print_header <- function(left, right = "", color = cyan) {
+cat_head <- function(left, right = "", style = cyan) {
   str <- header_line(left, right)
-  cat(color(str), "\n\n", sep = "")
+  cat_line(str, style = style)
 }
 
 #' @importFrom crayon red make_style
 
-print_entry <- function(entry) {
-
-  greyish <- make_style("darkgrey")
+print_entry <- function(entry, entry_style) {
 
   lines <- strsplit(entry, "\n", fixed = TRUE)[[1]]
 
-  first <- paste0(symbol$pointer, " ", lines[1])
-  cat(red(first), "\n", sep = "")
+  if (grepl("^(checking tests)|(checking whether package)", lines[1])) {
+    lines <- c(lines[1], "See below...")
+  }
 
-  cat(paste0("  ", greyish(lines[-1])), sep = "\n", "")
+  first <- paste0(symbol$pointer, " ", lines[1])
+  head <- do.call(style, structure(list(first), names = entry_style))
+  cat(head, "\n", sep = "")
+
+  cat(paste0("  ", lines[-1]), sep = "\n", "")
 }
 
 #' @export
 
 summary.rcmdcheck <- function(object, ...) {
+  structure(list(object), class = "rcmdcheck_summary")
+}
 
-  cat(symbol$line, symbol$line, " ", sep = "")
+print.rcmdcheck_summary <- function(x, ..., line = TRUE) {
+  object <- x[[1]]
+
+  if (line) {
+    cat(symbol$line, symbol$line, " ", sep = "")
+  }
+
   summary_entry(object, "errors")
   cat(" | ")
   summary_entry(object, "warnings")
