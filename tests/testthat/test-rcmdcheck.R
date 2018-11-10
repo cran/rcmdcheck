@@ -3,6 +3,7 @@ context("rcmdcheck")
 
 test_that("rcmdcheck works", {
 
+  skip_on_cran()
   Sys.unsetenv("R_TESTS")
 
   ## This is to test passing libpath to R CMD check subprocesses
@@ -42,11 +43,11 @@ test_that("rcmdcheck works", {
   ## Check that libpath was passed to R CMD check subprocesses
   expect_true(file.exists(tmp_out1))
   lp1 <- readRDS(tmp_out1)
-  expect_true(tmp_lib %in% lp1)
+  expect_true(tmp_lib %in% normalizePath(lp1, mustWork = FALSE))
 
   expect_true(file.exists(tmp_out2))
   lp2 <- readRDS(tmp_out2)
-  expect_true(tmp_lib %in% lp2)
+  expect_true(tmp_lib %in% normalizePath(lp2, mustWork = FALSE))
 
   ## This currently fails with devtools::check(), so it also fails
   ## on Travis
@@ -86,11 +87,11 @@ test_that("background gives same results", {
   ## Check that libpath was passed to R CMD check subprocesses
   expect_true(file.exists(tmp_out1))
   lp1 <- readRDS(tmp_out1)
-  expect_true(tmp_lib %in% lp1)
+  expect_true(tmp_lib %in% normalizePath(lp1, mustWork = FALSE))
 
   expect_true(file.exists(tmp_out2))
   lp2 <- readRDS(tmp_out2)
-  expect_true(tmp_lib %in% lp2)
+  expect_true(tmp_lib %in% normalizePath(lp2, mustWork = FALSE))
 
   ## This currently fails with devtools::check(), so it also fails
   ## on Travis
@@ -100,6 +101,7 @@ test_that("background gives same results", {
 
 test_that("Installation errors", {
 
+  skip_on_cran()
   bad2 <- rcmdcheck(test_path("bad2"), quiet = TRUE)
   expect_match(bad2$errors[1], "Installation failed")
 
@@ -173,7 +175,7 @@ test_that("check_dir argument", {
                          check_dir = tmp))
 
   expect_true(file.exists(tmp))
-  expect_equal(wd, normalizePath(tmp))
+  expect_equal(normalizePath(wd), normalizePath(tmp))
 })
 
 test_that("check_dir and rcmdcheck_process", {
