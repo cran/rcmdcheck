@@ -14,10 +14,10 @@ new_rcmdcheck <- function(stdout,
   stdout <- win2unix(stdout)
   stderr <- win2unix(stderr)
 
-  entries <- strsplit(paste0("\n", stdout), "\n* ", fixed = TRUE)[[1]][-1]
+  entries <- strsplit(paste0("\n", stdout), "\n\\*+[ ]")[[1]][-1]
   checkdir <- parse_checkdir(entries)
 
-  notdone <- function(x) grep("DONE", x, invert = TRUE, value = TRUE)
+  notdone <- function(x) grep("^DONE", x, invert = TRUE, value = TRUE)
 
   res <- structure(
     list(
@@ -77,6 +77,27 @@ parse_checkdir <- function(entries) {
   )
 }
 
+get_test_fail <- function(path) {
+  test_path <- file.path(path, dir(path, pattern = "^tests"))
+  paths <- dir(test_path, pattern = "\\.Rout\\.fail$", full.names = TRUE)
+
+  test_dirs <- basename(dirname(paths))
+  rel_paths <- ifelse(
+    test_dirs == "tests",
+    basename(paths),
+    paste0(basename(paths), " (", sub("^tests_", "", test_dirs), ")"))
+  names(paths) <- gsub("\\.Rout.fail", "", rel_paths)
+
+  trim_header <- function(x) {
+    first_gt <- regexpr(">", x)
+    substr(x, first_gt, nchar(x))
+  }
+
+  tests <- lapply(paths, read_char)
+  tests <- lapply(tests, win2unix)
+  lapply(tests, trim_header)
+}
+
 #' @export
 as.data.frame.rcmdcheck <- function(x,
                                     row.names = NULL,
@@ -134,9 +155,9 @@ parse_check <- function(file = NULL, text = NULL, ...) {
   ## If no text, then find the file, and read it in
   if (is.null(text)) {
     file <- find_check_file(file)
-    text <- readLines(file)
+    text <- readLines(file, encoding = "bytes")
   }
-  stdout <- paste(text, collapse = "\n")
+  stdout <- paste(reencode_log(text), collapse = "\n")
 
   # Simulate minimal description from info in log
   entries <- strsplit(paste0("\n", stdout), "\n* ", fixed = TRUE)[[1]][-1]
@@ -152,6 +173,31 @@ parse_check <- function(file = NULL, text = NULL, ...) {
     description = desc,
     ...
   )
+}
+
+validEnc <- function(x) {
+  ## We just don't do this on older R, because the functionality is
+  ## not available
+  if (getRversion() >= "3.3.0") {
+    asNamespace("base")$validEnc(x)
+  } else {
+    rep(TRUE, length(x))
+  }
+}
+
+reencode_log <- function(log) {
+  csline <- head(grep("^\\* using session charset: ",
+                      log, perl = TRUE, useBytes = TRUE, value = TRUE), 1)
+  if (length(csline)) {
+    cs <- strsplit(csline, ": ")[[1]][2]
+    log <- iconv(log, cs, "UTF-8", sub = "byte")
+    if (any(bad <- !validEnc(log))) {
+      log[bad] <- iconv(log[bad], to = "ASCII", sub = "byte")
+    }
+  } else {
+    log <- iconv(log, to = "ASCII", sub = "byte")
+  }
+  log
 }
 
 parse_package <- function(entries) {

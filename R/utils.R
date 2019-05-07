@@ -111,22 +111,6 @@ get_install_out <- function(path) {
   }
 }
 
-get_test_fail <- function(path) {
-  test_path <- file.path(path, "tests")
-  paths <- dir(test_path, pattern = "\\.Rout\\.fail$", full.names = TRUE)
-  names(paths) <- gsub("\\.Rout.fail", "", basename(paths))
-
-  trim_header <- function(x) {
-    first_gt <- regexpr(">", x)
-    substr(x, first_gt, nchar(x))
-  }
-
-  tests <- lapply(paths, read_char)
-  tests <- lapply(tests, win2unix)
-  lapply(tests, trim_header)
-}
-
-
 #' @importFrom crayon col_nchar
 
 col_align <- function(text, width = getOption("width"),
