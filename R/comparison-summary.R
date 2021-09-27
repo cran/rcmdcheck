@@ -6,7 +6,6 @@ summary.rcmdcheck_comparison <- function(object, ...) {
 }
 
 #' @export
-#' @importFrom crayon bgRed white green
 
 print.rcmdcheck_comparison_summary <- function(x, ...) {
   object <- x[[1]]
@@ -19,7 +18,11 @@ print.rcmdcheck_comparison_summary <- function(x, ...) {
     "+" = green(symbol$tick),
     "-" = red(symbol$cross)
   )
-  header <- paste0(sum_status, " ", object$package, " ", object$versions[[1]])
+  vers <- paste(
+    sort(package_version(unique(object$versions))),
+    collapse = " / "
+  )
+  header <- paste0(sum_status, " ", object$package, " ", vers)
 
   cat_line(
     col_align(header, width = 40), " ",
@@ -27,7 +30,7 @@ print.rcmdcheck_comparison_summary <- function(x, ...) {
     change_summary(object$cmp, "error"), " | ",
     change_summary(object$cmp, "warning"), " | ",
     change_summary(object$cmp, "note"),
-    style = make_style("darkgrey")
+    style = darkgrey
   )
 
   invisible(x)

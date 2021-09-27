@@ -40,7 +40,8 @@ new_rcmdcheck <- function(stdout,
       bioc        = description$has_fields("biocViews"),
 
       checkdir    = checkdir,
-      test_fail   = test_fail %||% get_test_fail(checkdir),
+      test_fail = test_fail %||% get_test_fail(checkdir),
+      test_output = get_test_output(checkdir, pattern = "\\.Rout"),
       install_out = get_install_out(checkdir)
     ),
     class = "rcmdcheck"
@@ -76,24 +77,27 @@ parse_checkdir <- function(entries) {
     perl = TRUE
   )
 }
+get_test_fail <- function(path, encoding = "") {
+  get_test_output(path, pattern = "\\.Rout\\.fail", encoding = encoding)
+}
 
-get_test_fail <- function(path) {
+get_test_output <- function(path, pattern, encoding = "") {
   test_path <- file.path(path, dir(path, pattern = "^tests"))
-  paths <- dir(test_path, pattern = "\\.Rout\\.fail$", full.names = TRUE)
+  paths <- dir(test_path, paste0(pattern, "$"), full.names = TRUE)
 
   test_dirs <- basename(dirname(paths))
   rel_paths <- ifelse(
     test_dirs == "tests",
     basename(paths),
     paste0(basename(paths), " (", sub("^tests_", "", test_dirs), ")"))
-  names(paths) <- gsub("\\.Rout.fail", "", rel_paths)
+  names(paths) <- gsub(pattern, "", rel_paths, useBytes = TRUE)
 
   trim_header <- function(x) {
     first_gt <- regexpr(">", x)
     substr(x, first_gt, nchar(x))
   }
 
-  tests <- lapply(paths, read_char)
+  tests <- lapply(paths, read_char, encoding = encoding)
   tests <- lapply(tests, win2unix)
   lapply(tests, trim_header)
 }
@@ -129,7 +133,12 @@ as.data.frame.rcmdcheck <- function(x,
 #' @importFrom digest digest
 
 hash_check <- function(check) {
-  cleancheck <- gsub("[^a-zA-Z0-9]", "", first_line(check))
+  cleancheck <- gsub(
+    "[^a-zA-Z0-9]",
+    "",
+    no_timing(first_line(check)),
+    useBytes = TRUE
+  )
   vapply(cleancheck, digest, "")
 }
 
@@ -141,7 +150,7 @@ hash_check <- function(check) {
 #'
 #' @param file The \code{00check.log} file, or a directory that
 #'   contains that file. It can also be a connection object.
-#' @param text The contentst of a \code{00check.log} file.
+#' @param text The contents of a \code{00check.log} file.
 #' @param ... Other arguments passed onto the constructor.
 #'   Used for testing.
 #' @return An \code{rcmdcheck} object, the check results.
@@ -155,7 +164,7 @@ parse_check <- function(file = NULL, text = NULL, ...) {
   ## If no text, then find the file, and read it in
   if (is.null(text)) {
     file <- find_check_file(file)
-    text <- readLines(file, encoding = "bytes")
+    text <- readLines(file, encoding = "bytes", warn = FALSE)
   }
   stdout <- paste(reencode_log(text), collapse = "\n")
 
@@ -231,8 +240,8 @@ parse_version <- function(entries) {
 #' @seealso \code{\link{parse_check}}
 #' @export
 
-parse_check_url <- function(url, quiet = TRUE) {
-  parse_check(text = download_file(url, quiet = quiet))
+parse_check_url <- function(url, quiet = FALSE) {
+  parse_check(text = download_file_lines(url, quiet = quiet))
 }
 
 find_check_file <- function(file) {

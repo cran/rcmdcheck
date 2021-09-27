@@ -36,6 +36,8 @@
 #' * `repos`: The `repos` option to set for the check.
 #'   This is needed for cyclic dependency checks if you use the
 #'   `--as-cran` argument. The default uses the current value.
+#' * `env`: A named character vector, extra environment variables to
+#'   set in the check process.
 #'
 #' @section Details:
 #' Most methods are inherited from [callr::rcmd_process] and
@@ -61,9 +63,9 @@ rcmdcheck_process <- R6Class(
 
     initialize = function(path = ".", args = character(),
       build_args = character(), check_dir = NULL, libpath = .libPaths(),
-      repos = getOption("repos"))
+      repos = getOption("repos"), env = character())
       rcc_init(self, private, super, path, args, build_args, check_dir,
-               libpath, repos),
+               libpath, repos, env),
 
     parse_results = function()
       rcc_parse_results(self, private),
@@ -74,21 +76,9 @@ rcmdcheck_process <- R6Class(
       l
     },
 
-    read_error_lines = function(...) {
-      l <- super$read_error_lines(...)
-      private$cstderr <- c(private$cstderr, paste0(l, "\n"))
-      l
-    },
-
     read_output = function(...) {
       l <- super$read_output(...)
       private$cstdout <- c(private$cstdout, l)
-      l
-    },
-
-    read_error = function(...) {
-      l <- super$read_error(...)
-      private$cstderr <- c(private$cstderr, l)
       l
     },
 
@@ -115,7 +105,7 @@ rcmdcheck_process <- R6Class(
 #' @importFrom desc desc
 
 rcc_init <- function(self, private, super, path, args, build_args,
-                     check_dir, libpath, repos) {
+                     check_dir, libpath, repos, env) {
 
   if (file.info(path)$isdir) {
     path <- find_package_root_file(path = path)
@@ -130,6 +120,12 @@ rcc_init <- function(self, private, super, path, args, build_args,
     cleanup <- FALSE
   }
 
+  # Add pandoc to the PATH for R CMD build.
+  # The updated PATH is also inherited in the subprocess below.
+  if (should_use_rs_pandoc()) local_path(Sys.getenv("RSTUDIO_PANDOC"))
+
+  pkgbuild::without_cache(pkgbuild::local_build_tools())
+
   targz <- build_package(path, check_dir, build_args = build_args,
                          libpath = libpath, quiet = TRUE)
 
@@ -138,25 +134,39 @@ rcc_init <- function(self, private, super, path, args, build_args,
   private$check_dir <- check_dir
   private$targz <- targz
 
-  private$session_output <- tempfile()
-  profile <- make_fake_profile(session_output = private$session_output)
-  private$tempfiles  <- c(private$session_output, profile)
+  set_env(path, targz, private$description)
+
+  # set up environment, start with callr safe set
+  chkenv <- callr::rcmd_safe_env()
+
+  package <- private$description$get("Package")[[1]]
+  libdir <- file.path(dirname(targz), paste0(package, ".Rcheck"))
+
+  # if R_TESTS is set here, we'll skip the session_info, because we are
+  # probably inside test cases of some package
+  if (Sys.getenv("R_TESTS", "") == "") {
+    private$session_output <- tempfile()
+    private$tempfiles  <- c(private$session_output, profile)
+    profile <- make_fake_profile(package, private$session_output, libdir)
+    chkenv["R_TESTS"] <- profile
+  }
+
+  # user supplied env vars take precedence
+  if (length(env)) chkenv[names(env)] <- env
 
   options <- rcmd_process_options(
     cmd = "check",
     cmdargs = c(basename(targz), args),
-    libpath = libpath,
+    libpath = c(libdir, libpath),
     repos = repos,
-    user_profile = TRUE
+    user_profile = FALSE,
+    stderr = "2>&1",
+    env = chkenv
   )
 
-  with_envvar(
-    c(R_PROFILE_USER = profile,
-      R_LIBS_USER = paste(libpath, collapse = .Platform$path.sep)),
-    with_dir(
-      dirname(targz),
-      super$initialize(options)
-    )
+  with_dir(
+    dirname(targz),
+    super$initialize(options)
   )
 
   invisible(self)
@@ -166,8 +176,8 @@ rcc_parse_results <- function(self, private) {
   if (self$is_alive()) stop("Process still alive")
 
   ## Make sure all output is read out
-  self$read_output_lines()
-  self$read_error_lines()
+  if (self$has_output_connection()) self$read_output_lines()
+  if (self$has_error_connection()) self$read_error_lines()
 
   on.exit(unlink(private$tempfiles, recursive = TRUE), add = TRUE)
 

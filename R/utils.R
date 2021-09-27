@@ -1,22 +1,19 @@
 
-read_char <- function(path, ...) {
-  readChar(path, nchars = file.info(path)$size, ...)
+read_char <- function(path, encoding = "", ...) {
+  txt <- readChar(path, nchars = file.info(path)$size, useBytes = TRUE, ...)
+  iconv(txt, encoding, "UTF-8", sub = "byte")
 }
 
 win2unix <- function(str) {
-  gsub("\r\n", "\n", str, fixed = TRUE)
-}
-
-#' @importFrom utils download.file
-
-download_file <- function(url, quiet = TRUE) {
-  download.file(url, tmp <- tempfile(), quiet = quiet)
-  on.exit(unlink(tmp), add = TRUE)
-  readLines(tmp)
+  gsub("\r\n", "\n", str, fixed = TRUE, useBytes = TRUE)
 }
 
 is_string <- function(x) {
   is.character(x) && length(x) == 1 && !is.na(x)
+}
+
+is_count <- function(x) {
+  is.numeric(x) && length(x) == 1 && !is.na(x) && round(x) == x
 }
 
 `%notin%` <- function(needle, haystack) {
@@ -102,22 +99,20 @@ cat0 <- function(..., sep = "") {
   cat(..., sep = "")
 }
 
-get_install_out <- function(path) {
+get_install_out <- function(path, encoding = "") {
   install_out <- file.path(path, "00install.out")
   if (is_string(install_out) && file.exists(install_out)) {
-    win2unix(read_char(install_out))
+    win2unix(read_char(install_out, encoding = encoding))
   } else {
     "<00install.out file does not exist>"
   }
 }
 
-#' @importFrom crayon col_nchar
-
-col_align <- function(text, width = getOption("width"),
+col_align <- function(text, width = cli::console_width(),
                       align = c("left", "center", "right")) {
 
   align <- match.arg(align)
-  nc <- col_nchar(text)
+  nc <- cli::ansi_nchar(text, type = "width")
 
   if (width <= nc) {
     text
@@ -163,4 +158,57 @@ cat_line <- function(..., style = NULL) {
 
 duration <- function(start) {
   as.double(Sys.time() - start, units = "secs")
+}
+
+as_integer <- function(x) {
+  suppressWarnings(as.integer(x))
+}
+
+YES_WORDS <- c("true",  "yes", "on",  "1", "yep",  "yeah")
+NO_WORDS  <- c("false", "no",  "off", "0", "nope", "nah")
+
+as_flag <- function(x, default = FALSE, name = "") {
+  x1 <- trimws(tolower(x))
+  if (is.na(x1)) return(default)
+  if (x1 == "") return(default)
+  if (x1 %in% YES_WORDS) return(TRUE)
+  if (x1 %in% NO_WORDS) return(FALSE)
+  warning(
+    "Invalid ",
+    if (nchar(name)) paste0(encodeString(name, quote = "`"), " "),
+    "option value: ",
+    encodeString(x, quote = "`"),
+    ", must be TRUE or FALSE"
+  )
+  default
+}
+
+no_timing <- function(x) {
+  gsub("\\[[0-9]+s(/[0-9]+s)?\\] ([A-Z]+)", "\\2", x, useBytes = TRUE)
+}
+
+should_use_rs_pandoc <- function() {
+  ev <- Sys.getenv("RCMDCHECK_USE_RSTUDIO_PANDOC", "")
+
+  if (tolower(ev) == "true") {
+    TRUE
+
+  } else if (tolower(ev) == "false") {
+    FALSE
+
+  } else {
+    !nzchar(Sys.which("pandoc")) && nzchar(Sys.getenv("RSTUDIO_PANDOC"))
+  }
+}
+
+data_literal <- function(...) {
+  cl <- match.call(expand.dots = FALSE)
+  rows <- vapply(cl$..., function(x) paste(deparse(x), collapse = " "), "")
+  utils::read.table(
+    textConnection(rows),
+    strip.white = TRUE,
+    sep = "|",
+    header = TRUE,
+    colClasses = "character"
+  )
 }

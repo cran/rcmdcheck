@@ -1,5 +1,12 @@
 
-context("rcmdcheck")
+# these are set by devtools, and probably by --as-cran as well,
+# so we unset them here
+
+withr::local_envvar(
+  "_R_CHECK_CRAN_INCOMING_REMOTE_" = NA_character_,
+  "_R_CHECK_CRAN_INCOMING_" = NA_character_,
+  "_R_CHECK_FORCE_SUGGESTS_" = NA_character_
+)
 
 test_that("rcmdcheck works", {
 
@@ -33,8 +40,8 @@ test_that("rcmdcheck works", {
     "Non-standard license specification"
   )
 
-  ## This fails without LaTex, which is not available on Appveyor
-  if (!identical(Sys.getenv("APPVEYOR"), "True")) {
+  ## This fails without LaTex, which is not available on GHA by default
+  if (Sys.which("latex") != "") {
     expect_equal(length(bad1$errors), 0)
   }
   expect_true(length(bad1$warnings) >= 1)
@@ -46,16 +53,28 @@ test_that("rcmdcheck works", {
   ## Check that libpath was passed to R CMD check subprocesses
   expect_true(file.exists(tmp_out1))
   lp1 <- readRDS(tmp_out1)
-  expect_true(tmp_lib %in% normalizePath(lp1, mustWork = FALSE))
+  expect_true(tmp_lib %in% normalizePath(lp1$libpath, mustWork = FALSE))
 
   expect_true(file.exists(tmp_out2))
   lp2 <- readRDS(tmp_out2)
   expect_true(tmp_lib %in% normalizePath(lp2, mustWork = FALSE))
 
-  ## This currently fails with devtools::check(), so it also fails
-  ## on Travis
-  skip_on_travis()
-  expect_s3_class(bad1$session_info, "session_info")
+  # check.env file was loaded
+  expect_equal(lp1$env[['_R_CHECK_PKG_SIZES_THRESHOLD_']], "142")
+
+  ## check_details. Need to remove non-deterministic parts
+  det <- check_details(bad1)
+  si <- det$session_info
+  det$session_info <- NULL
+
+  expect_true(file.exists(det$checkdir))
+  expect_true(file.info(det$checkdir)$isdir)
+  det$checkdir <- NULL
+
+  expect_match(det$description, "^Package: badpackage")
+  det$description <- NULL
+
+  expect_s3_class(si, "session_info")
 })
 
 test_that("background gives same results", {
@@ -81,7 +100,12 @@ test_that("background gives same results", {
   bad1 <- rcmdcheck_process$new(
      test_path("bad1"),
      libpath = c(tmp_lib, .libPaths()))
+  # If we read out the output, it'll still save it internally
+  bad1$read_output()
   bad1$read_all_output_lines()
+  # No separate stderr by default
+  expect_error(bad1$read_error())
+  expect_error(bad1$read_all_error_lines())
   res <- bad1$parse_results()
 
   expect_match(res$warnings[1], "Non-standard license specification")
@@ -90,15 +114,15 @@ test_that("background gives same results", {
   ## Check that libpath was passed to R CMD check subprocesses
   expect_true(file.exists(tmp_out1))
   lp1 <- readRDS(tmp_out1)
-  expect_true(tmp_lib %in% normalizePath(lp1, mustWork = FALSE))
+  expect_true(tmp_lib %in% normalizePath(lp1$libpath, mustWork = FALSE))
 
   expect_true(file.exists(tmp_out2))
   lp2 <- readRDS(tmp_out2)
   expect_true(tmp_lib %in% normalizePath(lp2, mustWork = FALSE))
 
-  ## This currently fails with devtools::check(), so it also fails
-  ## on Travis
-  skip_on_travis()
+  # check.env file was loaded
+  expect_equal(lp1$env[['_R_CHECK_PKG_SIZES_THRESHOLD_']], "142")
+
   expect_s3_class(res$session_info, "session_info")
 })
 

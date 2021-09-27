@@ -1,5 +1,10 @@
 
-context("compare_to_cran")
+cran <- webfakes::new_app_process(cran_app())
+withr::local_envvar(
+  RCMDCHECK_BASE_URL = paste0(cran$url(), "web/checks/"),
+  RCMDCHECK_FLAVOURS_URL = paste0(cran$url(), "web/checks/check_flavors.html"),
+  RCMDCHECK_DETAILS_URL = paste0(cran$url(), "nosvn/R.check/")
+)
 
 test_that("can get results (windows)", {
   skip_on_cran()
